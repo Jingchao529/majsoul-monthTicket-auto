@@ -2,15 +2,20 @@ name: Login to Majsoul
 
 on:
   schedule:
-    - cron: '5 21 * * *'  # 21:05 UTC time (6:05 a.m. Korean time)
+    - cron: '5 21 * * *'  # 21:05 UTC = 05:05 Beijing time
   workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false      # one account failing does not cancel the others
+      max-parallel: 1       # log in accounts one at a time
+      matrix:
+        n: [1, 2, 3, 4, 5]  # account slots; empty slots are skipped
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -20,14 +25,29 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Execute month ticket automation
-      run: npm start
+    - name: Claim month ticket (account ${{ matrix.n }})
+      run: |
+        if [ -z "$EMAIL" ] && [ -z "$UID" ]; then
+          echo "No secrets for account ${{ matrix.n }}, skipping."
+          exit 0
+        fi
+        npm start
       env:
-        UID: ${{ secrets.UID }}
-        TOKEN: ${{ secrets.TOKEN }}
-        EMAIL: ${{ secrets.EMAIL }}
-        PASSWORD: ${{ secrets.PASSWORD }}
         MS_SERVER: ${{ secrets.MS_SERVER }}
+        EMAIL: ${{ secrets[format('EMAIL_{0}', matrix.n)] }}
+        PASSWORD: ${{ secrets[format('PASSWORD_{0}', matrix.n)] }}
+        UID: ${{ secrets[format('UID_{0}', matrix.n)] }}
+        TOKEN: ${{ secrets[format('TOKEN_{0}', matrix.n)] }}
+
+  keep-alive:
+    needs: run-script
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Update Keep-Alive File
       run: |
@@ -37,5 +57,3 @@ jobs:
         git add keep_alive.txt
         git commit -m "Keep-alive: Update timestamp"
         git push
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
